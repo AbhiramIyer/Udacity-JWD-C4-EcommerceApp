@@ -1,10 +1,14 @@
 package com.example.demo.controllers;
 
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.Optional;
 
+import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +24,7 @@ import com.example.demo.model.requests.CreateUserRequest;
 
 @RestController
 @RequestMapping("/api/user")
+@Log4j2
 public class UserController {
 	
 	@Autowired
@@ -27,6 +32,9 @@ public class UserController {
 	
 	@Autowired
 	private CartRepository cartRepository;
+
+	@Autowired
+	private BCryptPasswordEncoder bCryptPasswordEncoder;
 
 	@GetMapping("/id/{id}")
 	public ResponseEntity<User> findById(@PathVariable Long id) {
@@ -41,13 +49,34 @@ public class UserController {
 	
 	@PostMapping("/create")
 	public ResponseEntity<User> createUser(@RequestBody CreateUserRequest createUserRequest) {
+		if (userRepository.findByUsername(createUserRequest.getUsername()) != null) {
+			log.info("metricClass=CreateUser metric=BadRequest");
+			return ResponseEntity.badRequest().build();
+		}
 		User user = new User();
 		user.setUsername(createUserRequest.getUsername());
-		Cart cart = new Cart();
-		cartRepository.save(cart);
-		user.setCart(cart);
-		userRepository.save(user);
+		if (!meetsPasswordCriteria(createUserRequest.getPassword(), createUserRequest.getConfirmPassword())) {
+			log.info("metricClass=CreateUser metric=BadRequest");
+			return ResponseEntity.badRequest().build();
+		}
+
+		user.setPassword(bCryptPasswordEncoder.encode(createUserRequest.getPassword()));
+
+		try {
+			Cart cart = new Cart();
+			cartRepository.save(cart);
+			user.setCart(cart);
+			userRepository.save(user);
+		} catch (Exception e) {
+			log.info("metricClass=CreateUser metric=Exception cause = {}", e.getMessage());
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+		}
+		log.info("metricClass=CreateUser metric=Success");
 		return ResponseEntity.ok(user);
 	}
-	
+
+	private boolean meetsPasswordCriteria(String password, String confirmPassword) {
+		return password != null && password.equals(confirmPassword) && password.length() >= 8;
+	}
+
 }
